@@ -3,7 +3,7 @@ import re
 from pathlib import Path
 
 here = Path(__file__).absolute().parent
-example_dir = here / ".." / "src" / "examples" / "addons"
+example_dir = here / ".." / ".." / "examples" / "addons"
 examples = example_dir.glob("*.py")
 
 overview = []
@@ -51,7 +51,7 @@ print(
 
 ### Built-In Addons
 
-Much of mitmproxy’s own functionality is defined in
+Much of mitmproxy's own functionality is defined in
 [a suite of built-in addons](https://github.com/mitmproxy/mitmproxy/tree/main/mitmproxy/addons),
 implementing everything from functionality like anticaching and sticky cookies to our onboarding webapp.
 The built-in addons make for instructive reading, and you will quickly see that quite complex functionality

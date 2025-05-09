@@ -5,6 +5,4 @@ aliases:
   - /addons-examples/
 ---
 
-# 插件示例
-
 {{< readfile file="/generated/examples.html" markdown="true" >}} 
