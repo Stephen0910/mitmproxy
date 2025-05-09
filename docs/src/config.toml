@@ -5,6 +5,19 @@ publishDir = "../public"
 RelativeURLs = true
 pygmentsCodefences = true
 pygmentsUseClasses = true
+defaultContentLanguage = "en"
+
+# 多语言支持
+[languages]
+  [languages.en]
+    contentDir = "content"
+    languageName = "English"
+    weight = 1
+  [languages.zh]
+    contentDir = "content-zh"
+    languageName = "中文"
+    weight = 2
+    title = "mitmproxy.org 文档"
 
 [indexes]
 tag = "tags"

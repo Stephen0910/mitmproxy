@@ -1,0 +1,295 @@
+---
+title: "功能特性"
+weight: 4
+aliases:
+  - /overview-features/
+---
+
+# 功能特性
+
+- [反缓存](#反缓存)
+- [黑名单](#黑名单)
+- [客户端重放](#客户端重放)
+- [本地映射](#本地映射)
+- [远程映射](#远程映射)
+- [修改正文](#修改正文)
+- [修改头部](#修改头部)
+- [代理认证](#代理认证)
+- [服务器端重放](#服务器端重放)
+- [粘性认证](#粘性认证)
+- [粘性Cookie](#粘性cookie)
+- [流式传输](#流式传输)
+
+## 反缓存
+
+当设置了`anticache`选项时，它会移除可能引起服务器返回`304 Not Modified`响应的头部（`if-none-match`和`if-modified-since`）。当您想确保完整捕获HTTP交换时，这很有用。在客户端重放时也经常使用，以确保服务器响应完整数据。
+
+## 黑名单
+
+使用`block_list`选项，您可以阻止特定网站或请求。Mitmproxy会返回一个固定的HTTP状态码，或者根本不返回响应。
+
+`block_list`模式看起来像这样：
+
+```
+/flow-filter/status-code
+```
+
+* **flow-filter**是一个可选的mitmproxy[过滤表达式]({{< relref "/concepts/filters">}})，描述应该阻止哪些请求。
+* **status-code**是被阻止请求时mitmproxy提供的[HTTP状态码](https://en.wikipedia.org/wiki/List_of_HTTP_status_codes)。
+  特殊状态码444指示mitmproxy"挂断"连接且不发送任何响应。
+
+_分隔符_是任意的，由第一个字符定义。
+
+#### 示例
+
+模式 | 描述
+------- | -----------
+`:~d google-analytics.com:404` | 阻止所有对google-analytics.com的请求，并返回"404 Not Found"。
+`:~d example.com$:444` | 阻止所有对example.com的请求，且不发送HTTP响应。
+`:!~d ^example\.com$:403` | 只允许对*example.com*的HTTP请求。注意，这对主动攻击者不安全，可以通过切换到非HTTP协议绕过。
+
+## 客户端重放
+
+客户端重放顾名思义：您提供先前保存的HTTP对话，mitmproxy逐一重放客户端请求。请注意，mitmproxy会序列化请求，等待服务器响应后再开始下一个请求。这可能与记录的对话不同，在记录的对话中，请求可能是并发进行的。
+
+您可能想要结合使用客户端重放与`anticache`选项，以确保服务器响应完整数据。
+
+## 本地映射
+
+`map_local`选项允许您指定任意数量的模式，定义将HTTP请求重定向到本地文件或目录。系统会获取本地文件而非原始资源，并透明地返回给客户端。
+
+`map_local`模式看起来像这样：
+
+```
+|url-regex|local-path
+|flow-filter|url-regex|local-path
+```
+
+* **local-path**是应提供给客户端的文件或目录。
+
+* **url-regex**是应用于请求URL的正则表达式。它必须匹配才会进行重定向。
+
+* **flow-filter**是一个可选的mitmproxy[过滤表达式]({{< relref "/concepts/filters">}})，进一步限制哪些请求会被重定向。
+
+_分隔符_是任意的，由第一个字符定义（在上面的示例中是`|`）。
+
+#### 示例
+
+模式 | 描述
+------- | -----------
+`\|example.com/main.js\|~/main-local.js` | 用`~/main-local.js`替换`example.com/main.js`。
+`\|example.com/static\|~/static` | 用`~/static/foo/bar.css`替换`example.com/static/foo/bar.css`。
+`\|example.com/static/foo\|~/static` | 用`~/static/bar.css`替换`example.com/static/foo/bar.css`。
+`\|~m GET\|example.com/static\|~/static` | 用`~/static/foo/bar.css`替换`example.com/static/foo/bar.css`（但仅适用于GET请求）。
+
+### 详细说明
+
+如果*local-path*是一个文件，将始终提供该文件。文件更改会立即反映，没有缓存。
+
+如果*local-path*是一个目录，*url-regex*用于将请求URL分成两部分，右侧部分会附加到*local-path*上，不包括查询字符串。
+但是，如果*url-regex*包含正则捕获组，这个行为会改变，第一个捕获组将被附加（且不会去除查询字符串）。
+特殊字符会映射为`_`。如果找不到文件，会尝试附加`/index.html`再次查找。无法进行超出原始指定目录的目录遍历。
+
+为说明这点，考虑以下示例，它将所有对`example.org/css*`的请求映射到本地目录`~/static-css`。
+
+<pre>
+                  ┌── url regex ──┬─ local path ─┐
+map_local option: |<span style="color:#f92672">example.com/css</span>|<span style="color:#82b719">~/static-css</span>
+                   <!--                     -->         │
+                   <!--                     -->         │    URL在此处分割
+                   <!--                     -->         ▼            ▼
+HTTP Request URL: https://<span style="color:#f92672">example.com/css</span><span style="color:#66d9ef">/print/main.css</span><span style="color:#bbb">?timestamp=123</span>
+                          <!--                     -->               <!--                            -->      │        <!--                         -->        ▼
+                          <!--                     -->               <!--                            -->      ▼        <!--                         -->      查询字符串被忽略
+Served File:      首选: <span style="color:#82b719">~/static-css</span><span style="color:#66d9ef">/print/main.css</span>
+                  备用: <span style="color:#82b719">~/static-css</span><span style="color:#66d9ef">/print/main.css</span>/index.html
+                  否则: 无内容的404响应
+</pre>
+
+如果文件依赖于查询字符串，我们可以使用正则捕获组。在这个例子中，所有对`example.org/index.php?page=<page-name>`的`GET`请求都被映射到`~/static-dir/<page-name>`：
+
+<pre>
+                    flow
+                  ┌filter┬─────────── url regex ───────────┬─ local path ─┐
+map_local option: |~m GET|<span style="color:#f92672">example.com/index.php\\?page=</span><span style="color:#66d9ef">(.+)</span>|<span style="color:#82b719">~/static-dir</span>
+                          <!--                     -->  │                          <!--                            --> │
+                          <!--                     -->  │                          <!--                            --> │ 正则组 = 后缀
+                          <!--                     -->  ▼                          <!--                            --> ▼
+HTTP Request URL: https://<span style="color:#f92672">example.com/index.php?page=</span><span style="color:#66d9ef">aboutus</span></span>
+                          <!--                     -->                           <!--                            -->   │
+                          <!--                     -->                           <!--                            -->   ▼
+Served File:                 首选: <span style="color:#82b719">~/static-dir</span>/<span style="color:#66d9ef">aboutus</span>
+                             备用: <span style="color:#82b719">~/static-dir</span>/<span style="color:#66d9ef">aboutus</span>/index.html
+                             否则: 无内容的404响应
+</pre>
+
+## 远程映射
+
+`map_remote`选项允许您指定任意数量的模式，用于在发送到服务器之前定义HTTP请求URL中的替换。系统会获取替换后的URL而非原始资源，并将相应的HTTP响应透明地返回给客户端。
+`map_remote`模式看起来像这样：
+
+```
+|flow-filter|url-regex|replacement
+|url-regex|replacement
+```
+
+* **flow-filter**是一个可选的mitmproxy[过滤表达式]({{< relref "/concepts/filters">}})，定义`map_remote`选项适用于哪些请求。
+
+* **url-regex**是一个有效的Python正则表达式，定义在请求URL中替换的内容。
+
+* **replacement**是替换的字符串字面值。
+
+_分隔符_是任意的，由第一个字符定义（在上面的示例中是`|`）。
+
+#### 示例
+
+将所有以`.jpg`结尾的请求映射到`https://placedog.net/640/480?random`。
+
+```
+|.*\.jpg$|https://placedog.net/640/480?random
+```
+
+将所有来自`example.org`的GET请求重新路由到`mitmproxy.org`（使用`|`作为分隔符）：
+
+```
+|~m GET|//example.org/|//mitmproxy.org/
+```
+
+## 修改正文
+
+`modify_body`选项允许您指定任意数量的模式，定义流正文内的替换。`modify_body`模式看起来像这样：
+
+```
+/flow-filter/body-regex/replacement
+/flow-filter/body-regex/@file-path
+/body-regex/replacement
+/body-regex/@file-path
+```
+
+* **flow-filter**是一个可选的mitmproxy[过滤表达式]({{< relref "/concepts/filters">}})，定义替换适用于哪些流。
+
+* **body-regex**是一个有效的Python正则表达式，定义替换的内容。
+
+* **replacement**是替换的字符串字面值。如果替换字符串字面值以`@`开头，如`@file-path`，则视为从中读取替换内容的**文件路径**。
+
+_分隔符_是任意的，由第一个字符定义（在上面的示例中是`/`）。
+
+修改钩子在接收到客户端请求或服务器响应时触发。只影响匹配的流组件：例如，如果修改钩子在服务器响应上触发，则替换只在Response对象上运行，保持Request不变。您可以使用过滤器模式控制钩子是在请求、响应或两者上触发。如果需要比这更精细的控制，可以使用Flow组件的替换API创建一个简单的脚本。正文修改对流式传输的正文没有影响。有关更多详细信息，请参阅[流式传输](#流式传输)。
+
+#### 示例
+
+在请求正文中将`foo`替换为`bar`：
+
+```
+/~q/foo/bar
+```
+
+将`foo`替换为从`~/xss-exploit`读取的数据：
+
+```bash
+mitmdump --modify-body :~q:foo:@~/xss-exploit
+```
+
+## 修改头部
+
+`modify_headers`选项允许您指定要修改的一组头部。新头部可以添加，现有头部可以被覆盖或删除。`modify_headers`模式看起来像这样：
+
+```
+/flow-filter/name/value
+/flow-filter/name/@file-path
+/name/value
+/name/@file-path
+```
+
+* **flow-filter**是一个可选的mitmproxy[过滤表达式]({{< relref "/concepts/filters">}})，定义在哪些流上修改头部。
+
+* **name**是要设置、替换或删除的头部名称。
+
+* **value**是要设置或替换的头部值。空的**value**会删除具有**name**的现有头部。如果值字符串字面值以`@`开头，如`@file-path`，则视为从中读取替换内容的**文件路径**。
+
+_分隔符_是任意的，由第一个字符定义（在上面的示例中是`/`）。
+
+默认情况下，现有头部会被覆盖。可以使用过滤表达式更改此行为。
+
+修改钩子在接收到客户端请求或服务器响应时触发。只影响匹配的流组件：例如，如果修改钩子在服务器响应上触发，则替换只在Response对象上运行，保持Request不变。您可以使用过滤器模式控制钩子是在请求、响应或两者上触发。如果需要比这更精细的控制，可以使用Flow组件的替换API创建一个简单的脚本。
+
+#### 示例
+
+为所有请求设置`Host`头部为`example.org`（现有`Host`头部会被替换）：
+
+```
+/~q/Host/example.org
+```
+
+为所有没有现有`Host`头部的请求设置`Host`头部为`example.org`：
+
+```
+/~q & !~h Host:/Host/example.org
+```
+
+为所有请求设置`User-Agent`头部为从`~/useragent.txt`读取的数据（现有`User-Agent`头部会被替换）：
+
+```
+/~q/User-Agent/@~/useragent.txt
+```
+
+从所有请求中删除现有的`Host`头部：
+
+```
+/~q/Host/
+```
+
+## 代理认证
+
+`proxyauth`选项要求用户在允许使用代理之前进行身份验证。认证头部从流中剥离，因此不会传递给上游服务器。目前，仅支持HTTP基本认证。
+
+代理认证在透明代理模式下设计上不能很好工作，因为客户端不知道它在与代理通信。Mitmproxy将为每个单独的域重新请求凭据。SOCKS代理认证目前未实现([#738](https://github.com/mitmproxy/mitmproxy/issues/738))。
+
+## 服务器端重放
+
+`server_replay`选项让我们可以从保存的HTTP对话中重放服务器响应。为此，我们使用一组启发式方法将传入请求与保存的响应匹配。默认情况下，我们在匹配传入请求与重放文件中的响应时排除请求头部，只使用URL和请求方法进行匹配。这在大多数情况下都有效，并使我们能够在请求头部自然变化的情况下重放服务器响应，例如使用不同的用户代理。
+
+有很多方法可以自定义匹配启发式，包括指定要包含的头部、要排除的请求参数等。这些选项都在`server_replay`前缀下收集 - 有关详细信息，请参阅内置文档。
+
+### 响应刷新
+
+简单地重放服务器响应而不进行修改通常会导致意外行为。例如，在记录对话时未来的cookie超时可能在重放时已经过期。默认情况下，mitmproxy在发送给客户端之前刷新服务器响应。**date**、**expires**和**last-modified**头部都更新为具有与记录时相同的相对时间偏移。因此，如果它们在记录时是过去的，则在重放时也会是过去的，反之亦然。Cookie过期时间以类似的方式更新。
+
+您可以通过将`server_replay_refresh`选项设置为`false`来关闭此行为。
+
+## 粘性认证
+
+`stickyauth`选项类似于粘性cookie选项，HTTP **Authorization**头部一旦被看到就简单地重放给服务器。这足以让您通过代理使用HTTP基本认证访问服务器资源。请注意，<span data-role="program">mitmproxy</span>（尚未）支持重放HTTP摘要认证。
+
+## 粘性Cookie
+
+当设置`stickycookie`选项时，**mitmproxy**将把服务器最近设置的cookie添加到任何没有cookie的请求中。考虑一个在认证后设置cookie来跟踪会话的服务。使用粘性cookie，您可以启动mitmproxy，并像通常使用浏览器那样向服务进行认证。认证后，您可以通过mitmproxy请求认证资源，就像它们未经认证一样，因为mitmproxy会自动将会话跟踪cookie添加到请求中。除其他功能外，这还使您可以编写与认证资源的交互脚本（使用wget或curl等工具），而不必担心认证。
+
+粘性cookie与[客户端重放](#客户端重放)结合使用特别强大 - 您可以记录一次认证过程，然后每次需要与安全资源交互时，只需在启动时重放它即可。
+
+## 流式传输
+
+默认情况下，mitmproxy会读取整个请求/响应，执行任何指示的操作，然后将消息发送给另一方。下载或上传大文件时，这可能会有问题。启用流式传输后，消息正文不会在代理上缓冲，而是直接发送给服务器/客户端。这目前意味着消息正文在mitmproxy中将无法访问，并且正文修改将不起作用。HTTP头部在发送之前仍会完全缓冲。
+
+通过在`stream_large_bodies`选项中指定大小限制来启用请求/响应流式传输。
+
+### 自定义流式传输
+
+您还可以使用脚本来自定义哪些请求或响应应该流式传输。应将需要标记为流式传输的请求/响应的`.stream`属性设置为`True`：
+
+```python
+"""
+选择哪些响应应该流式传输。
+
+为所有HTTP流启用响应流式传输。
+这相当于向mitmproxy传递`--set stream_large_bodies=1`。
+"""
+
+
+def responseheaders(flow):
+    """
+    为所有响应启用流式传输。
+    这相当于向mitmproxy传递`--set stream_large_bodies=1`。
+    """
+    flow.response.stream = True
+```
