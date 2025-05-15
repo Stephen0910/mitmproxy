@@ -5,4 +5,4 @@ aliases:
   - /addons-examples/
 ---
 
-{{< readfile file="/generated/examples.html" markdown="true" >}} 
+{{< readfile file="/generated/examples_cn.html" markdown="true" >}} 
